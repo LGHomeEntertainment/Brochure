@@ -23,12 +23,11 @@
     .page-container.left{transform-origin:right center; border-right:1px solid rgba(0,0,0,.06)}
     .page-container.right{transform-origin:left center}
 
-    /* flipping states are applied to containers */
+    /* flipping states */
     .page-container.flipping{transition:transform .8s cubic-bezier(0.25,0.46,0.45,0.94); z-index:1000}
-    .page-container.flip-left{transform:rotateY(180deg)}      /* turning backward */
-    .page-container.flip-right{transform:rotateY(-180deg)}    /* turning forward */
+    .page-container.flip-left{transform:rotateY(-180deg)}      /* turning backward */
+    .page-container.flip-right{transform:rotateY(180deg)}      /* turning forward */
 
-    /* subtle shadow while flipping */
     .page-container.flipping::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0) 100%);opacity:0;transition:opacity .4s;pointer-events:none}
     .page-container.flipping.shadow::after{opacity:1}
 
@@ -60,20 +59,11 @@
   </div>
 
   <script>
-    /* ---------------- CONFIG ---------------- */
-    const CONFIG = {
-      imagePrefix: 'Pg',
-      imageExtensions: ['jpg','jpeg','png','webp'],
-      maxPagesToCheck: 200,
-      loadingTimeout: 3000,
-      preloadAhead: 2,
-      animationDuration: 800
-    };
+    const CONFIG = { imagePrefix: 'Pg', imageExtensions: ['jpg','jpeg','png','webp'], maxPagesToCheck: 200, loadingTimeout: 3000, preloadAhead: 2, animationDuration: 800 };
 
-    /* ---------------- STATE ---------------- */
-    let pages = [null]; // keep index aligned with page numbers: pages[1] = Pg1
+    let pages = [null];
     let totalImages = 0;
-    let currentSpread = 0; // 0 = cover spread (left blank, right = Pg1)
+    let currentSpread = 0;
     let isAnimating = false;
 
     const $ = s => document.querySelector(s);
@@ -91,7 +81,6 @@
     flipbook.addEventListener('contextmenu', e=>e.preventDefault());
     document.addEventListener('dragstart', e=>e.preventDefault());
 
-    /* ---------------- INIT ---------------- */
     async function init(){
       const detected = await detectPages();
       if(detected.length === 0){
@@ -100,12 +89,10 @@
         return;
       }
 
-      // Reset and align indices
       pages = [null];
       detected.forEach(p => pages.push(p.path));
       totalImages = pages.length - 1;
 
-      // Build DOM once
       buildSpread();
       loading.style.display = 'none';
       updateControls();
@@ -123,64 +110,41 @@
       spread.appendChild(rightContainer);
       flipbook.appendChild(spread);
 
-      // initial render
       updateSpreadContent();
 
-      // Ensure transitions duration matches config
       leftContainer.style.transitionDuration = rightContainer.style.transitionDuration = (CONFIG.animationDuration / 1000) + 's';
     }
 
-    /* ---------------- RENDERING / INDEX MATH ----------------
-       currentSpread maps to page numbers like this:
-       spread 0 => left: 0 (blank), right: 1
-       spread 1 => left: 2, right: 3
-       spread 2 => left: 4, right: 5
-       ...
-       This keeps pages in natural reading order: Pg1 on right (cover)
-    */
     function updateSpreadContent(){
       const leftContainer = $('#leftContainer');
       const rightContainer = $('#rightContainer');
       leftContainer.innerHTML = '';
       rightContainer.innerHTML = '';
 
-      const leftIndex = currentSpread * 2;           // could be 0 for cover blank
+      const leftIndex = currentSpread * 2;
       const rightIndex = currentSpread * 2 + 1;
 
-      // For each container we decide what the front and back images are.
-      // - Right container: front = rightIndex, back = rightIndex + 2 (next right page when turning forward)
-      // - Left container: front = leftIndex, back = leftIndex - 2 (previous right page when turning backward)
-
-      createPagePair(leftContainer, leftIndex, leftIndex - 2);
-      createPagePair(rightContainer, rightIndex, rightIndex + 2);
+      createPagePair(leftContainer, leftIndex, leftIndex+1); // left front = Pg2, back = Pg1
+      createPagePair(rightContainer, rightIndex, rightIndex+1); // right front = Pg1, back = Pg2
     }
 
     function createPagePair(container, frontIndex, backIndex){
       const front = document.createElement('div'); front.className = 'page front';
       const back = document.createElement('div'); back.className = 'page back';
 
-      // Front side
       if(frontIndex > 0 && frontIndex <= totalImages && pages[frontIndex]){
         front.style.backgroundImage = `url('${pages[frontIndex]}')`;
-      } else {
-        front.classList.add('blank');
-      }
+      } else { front.classList.add('blank'); }
 
-      // Back side — the image that appears on the reverse of this sheet during flip
       if(backIndex > 0 && backIndex <= totalImages && pages[backIndex]){
         back.style.backgroundImage = `url('${pages[backIndex]}')`;
-        // Keep back rotated 180deg so that when the container flips, it reads in the correct direction
         back.style.transform = 'rotateY(180deg)';
-      } else {
-        back.classList.add('blank');
-        back.style.transform = 'rotateY(180deg)';
-      }
+      } else { back.classList.add('blank'); back.style.transform = 'rotateY(180deg)'; }
 
       container.appendChild(front);
       container.appendChild(back);
     }
 
-    /* ---------------- NAV ---------------- */
     function nextPage(){
       if(isAnimating) return;
       const maxSpreads = Math.ceil((totalImages) / 2);
@@ -189,15 +153,11 @@
       isAnimating = true; updateControls();
 
       const rightContainer = $('#rightContainer');
-      // Bring the right container to front so it appears on top while flipping
       rightContainer.style.zIndex = 1000;
       rightContainer.classList.add('flipping','shadow');
-
-      // start the rotation
       requestAnimationFrame(()=> rightContainer.classList.add('flip-right'));
 
       setTimeout(()=>{
-        // advance spread, re-render and reset
         currentSpread++;
         updateSpreadContent();
         resetAnimations();
@@ -237,13 +197,12 @@
       nextBtn.disabled = (currentSpread >= maxSpreads - 1) || isAnimating;
     }
 
-    /* ---------------- PRELOAD ---------------- */
     const preloaded = new Set();
     function preloadAround(spread){
       for(let d = -CONFIG.preloadAhead; d <= CONFIG.preloadAhead; d++){
         const s = spread + d;
         const left = s*2; const right = s*2+1;
-        [left, right, left+2, right+2].forEach(idx=>{
+        [left, right, left+1, right+1].forEach(idx=>{
           if(idx > 0 && idx <= totalImages && pages[idx] && !preloaded.has(pages[idx])){
             const img = new Image(); img.decoding = 'async'; img.src = pages[idx]; preloaded.add(pages[idx]);
           }
@@ -251,7 +210,6 @@
       }
     }
 
-    /* ---------------- DISCOVERY ---------------- */
     async function detectPages(){
       const found = [];
       for(let i=1;i<=CONFIG.maxPagesToCheck;i++){
@@ -261,7 +219,7 @@
           if(await checkImage(src)){ picked = src; break; }
         }
         if(picked) found.push({number:i,path:picked});
-        else if(found.length>0) break; // stop after sequence ends
+        else if(found.length>0) break;
       }
       return found;
     }
@@ -272,7 +230,6 @@
         const to = setTimeout(()=>{ if(!done){ done=true; resolve(false);} }, CONFIG.loadingTimeout);
         img.onload = ()=>{ if(!done){ done=true; clearTimeout(to); resolve(true);} };
         img.onerror = ()=>{ if(!done){ done=true; clearTimeout(to); resolve(false);} };
-        // cache-bust while loading from file system can be problematic but helps during dev
         img.src = src + `?v=${Date.now()}`;
       });
     }
