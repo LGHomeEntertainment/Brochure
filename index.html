@@ -21,49 +21,88 @@
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-user-drag:none;
     }
 
-    .sheet{ position:absolute; inset:0; }
+    .spread { 
+      position:absolute; inset:0; display:flex;
+      transform-style: preserve-3d;
+    }
 
-    .page{
-      position:absolute; top:0; bottom:0; width:50%; overflow:hidden; background:#fff;
-      background-position:center; background-size:cover; background-repeat:no-repeat;
-      pointer-events:none; backface-visibility:hidden; transform-style:preserve-3d;
-      will-change: transform; contain: layout paint;
+    .page-container {
+      position: relative;
+      width: 50%;
+      height: 100%;
+      transform-style: preserve-3d;
     }
-    .page.left { 
-      left:0; border-right:1px solid rgba(0,0,0,.06); 
+
+    .page {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-position: center;
+      background-size: cover;
+      background-repeat: no-repeat;
+      backface-visibility: hidden;
+      transform-style: preserve-3d;
+    }
+
+    .page.front {
+      z-index: 2;
+    }
+
+    .page.back {
+      transform: rotateY(180deg);
+      z-index: 1;
+    }
+
+    .page.blank { 
+      background: #fff !important; 
+    }
+
+    .page-container.left { 
       transform-origin: right center;
+      border-right: 1px solid rgba(0,0,0,.06);
     }
-    .page.right{ 
-      right:0; 
+
+    .page-container.right { 
       transform-origin: left center;
     }
-    .page.blank{ background:#fff !important; }
+
+    .page-container.flipping {
+      transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      z-index: 1000;
+    }
+
+    .page-container.flip-left {
+      transform: rotateY(180deg);
+    }
+
+    .page-container.flip-right {
+      transform: rotateY(-180deg);
+    }
+
+    /* 그림자 효과 */
+    .page-container.flipping::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(90deg, 
+        rgba(0,0,0,0.1) 0%, 
+        rgba(0,0,0,0.3) 50%, 
+        rgba(0,0,0,0.1) 100%
+      );
+      z-index: 10;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+      pointer-events: none;
+    }
+
+    .page-container.flipping.shadow::after {
+      opacity: 1;
+    }
 
     /* 중앙 스파인 */
     .flipbook::before{
       content:''; position:absolute; top:0; bottom:0; left:50%; width:2px; transform:translateX(-1px);
       background: linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,0) 40%, rgba(0,0,0,.12));
-      opacity:.25; pointer-events:none;
-    }
-
-    /* 페이지 뒤집기 애니메이션 */
-    .page.flipping {
-      transition: transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-      z-index: 1000;
-    }
-
-    .page.flipping::after {
-      content:''; position:absolute; inset:0; pointer-events:none;
-      background: linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,.2) 50%, rgba(0,0,0,0));
-      transition: opacity 0.7s ease;
-    }
-
-    .page.flip-right {
-      transform: rotateY(-180deg);
-    }
-
-    .page.flip-left {
-      transform: rotateY(180deg);
+      opacity:.25; pointer-events:none; z-index: 500;
     }
 
     .controls{ display:flex; justify-content:center; align-items:center; gap:12px; margin-top:20px }
@@ -81,7 +120,7 @@
     @keyframes spin{ to{ transform: rotate(360deg) } }
 
     @media (max-width: 768px){ .wrap{width:90vw} .nav-btn{ padding:10px 16px; font-size:14px } }
-    @media (prefers-reduced-motion: reduce){ .page{ transition:none !important } }
+    @media (prefers-reduced-motion: reduce){ .page-container{ transition:none !important } }
   </style>
 </head>
 <body>
@@ -103,23 +142,23 @@
       maxPagesToCheck: 100,
       loadingTimeout: 5000,
       preloadAhead: 2,
-      animationDuration: 700
+      animationDuration: 800
     };
 
-    let totalImages = 0, currentSpread = 0, totalSpreads = 0, isAnimating = false;
-    const spreads = []; // Each spread shows 2 pages side by side
+    let totalImages = 0, currentSpread = 0, isAnimating = false;
+    const pages = [];
     const preloaded = new Set();
 
     const $ = s => document.querySelector(s);
     const flipbook = $('#flipbook'), loading = $('#loading');
     const prevBtn = $('#prevBtn'), nextBtn = $('#nextBtn');
 
-    prevBtn.addEventListener('click', previousSpread);
-    nextBtn.addEventListener('click', nextSpread);
+    prevBtn.addEventListener('click', previousPage);
+    nextBtn.addEventListener('click', nextPage);
 
     document.addEventListener('keydown', e=>{
-      if(['ArrowLeft','ArrowUp'].includes(e.key)){ e.preventDefault(); previousSpread(); }
-      if(['ArrowRight','ArrowDown'].includes(e.key)){ e.preventDefault(); nextSpread(); }
+      if(['ArrowLeft','ArrowUp'].includes(e.key)){ e.preventDefault(); previousPage(); }
+      if(['ArrowRight','ArrowDown'].includes(e.key)){ e.preventDefault(); nextPage(); }
     });
 
     flipbook.addEventListener('contextmenu', e=>e.preventDefault());
@@ -131,151 +170,166 @@
         loading.innerHTML = `<div style="color:#e74c3c;text-align:center"><strong>No pages found</strong><br>Place images in the same folder as this HTML file.<br>Name them: <code>${CONFIG.imagePrefix}1.jpg</code>, <code>${CONFIG.imagePrefix}2.jpg</code>, etc.<br><small>Supported formats: ${CONFIG.imageExtensions.join(', ')}</small></div>`;
         updateControls(); return;
       }
-      totalImages = detected.length;
 
-      // Create spreads (2 pages each, except first page alone)
-      if(detected.length > 0) {
-        // First spread: blank + cover page
-        spreads.push({ leftPage: null, rightPage: detected[0] });
-        
-        // Remaining spreads: pairs of pages
-        for(let i = 1; i < detected.length; i += 2) {
-          const leftPage = detected[i] || null;
-          const rightPage = detected[i + 1] || null;
-          spreads.push({ leftPage, rightPage });
-        }
-      }
+      pages.length = 0;
+      pages.push(null); // Page 0 (blank for left side of cover)
+      detected.forEach(page => pages.push(page));
 
-      totalSpreads = spreads.length;
-      createAllSpreads();
-      showSpread(0);
-
+      totalImages = pages.length - 1;
+      createSpread();
+      
       loading.style.display = 'none';
       updateControls();
       preloadAround(currentSpread);
     }
 
-    function createAllSpreads() {
-      spreads.forEach((spread, index) => {
-        const spreadEl = document.createElement('div');
-        spreadEl.className = 'sheet';
-        spreadEl.style.zIndex = 1000 - index;
-        
-        // Left page
-        const leftPage = document.createElement('div');
-        leftPage.className = 'page left';
-        if(spread.leftPage) {
-          leftPage.style.backgroundImage = `url('${spread.leftPage.path}')`;
-        } else {
-          leftPage.classList.add('blank');
-        }
-        
-        // Right page  
-        const rightPage = document.createElement('div');
-        rightPage.className = 'page right';
-        if(spread.rightPage) {
-          rightPage.style.backgroundImage = `url('${spread.rightPage.path}')`;
-        } else {
-          rightPage.classList.add('blank');
-        }
-        
-        spreadEl.appendChild(leftPage);
-        spreadEl.appendChild(rightPage);
-        flipbook.appendChild(spreadEl);
-        
-        spread.element = spreadEl;
-        spread.leftPageEl = leftPage;
-        spread.rightPageEl = rightPage;
-      });
+    function createSpread() {
+      const spread = document.createElement('div');
+      spread.className = 'spread';
+      
+      // Left page container
+      const leftContainer = document.createElement('div');
+      leftContainer.className = 'page-container left';
+      leftContainer.id = 'leftContainer';
+      
+      // Right page container  
+      const rightContainer = document.createElement('div');
+      rightContainer.className = 'page-container right';
+      rightContainer.id = 'rightContainer';
+      
+      spread.appendChild(leftContainer);
+      spread.appendChild(rightContainer);
+      flipbook.appendChild(spread);
+      
+      updateSpreadContent();
     }
 
-    function showSpread(index) {
-      spreads.forEach((spread, i) => {
-        spread.element.style.display = (i === index) ? 'block' : 'none';
-        resetPageStyles(spread);
-      });
-      currentSpread = index;
+    function updateSpreadContent() {
+      const leftContainer = $('#leftContainer');
+      const rightContainer = $('#rightContainer');
+      
+      // Clear existing pages
+      leftContainer.innerHTML = '';
+      rightContainer.innerHTML = '';
+      
+      const leftPageIndex = currentSpread * 2;
+      const rightPageIndex = currentSpread * 2 + 1;
+      
+      // Left side - front and back
+      createPagePair(leftContainer, leftPageIndex, leftPageIndex + 2);
+      
+      // Right side - front and back
+      createPagePair(rightContainer, rightPageIndex, rightPageIndex + 2);
     }
 
-    function resetPageStyles(spread) {
-      [spread.leftPageEl, spread.rightPageEl].forEach(page => {
-        page.classList.remove('flipping', 'flip-right', 'flip-left');
-        page.style.transform = '';
-      });
+    function createPagePair(container, frontIndex, backIndex) {
+      // Front page
+      const front = document.createElement('div');
+      front.className = 'page front';
+      
+      if(frontIndex < pages.length && pages[frontIndex]) {
+        front.style.backgroundImage = `url('${pages[frontIndex].path}')`;
+      } else {
+        front.classList.add('blank');
+      }
+      
+      // Back page (what shows when flipped)
+      const back = document.createElement('div');
+      back.className = 'page back';
+      
+      if(backIndex < pages.length && pages[backIndex]) {
+        back.style.backgroundImage = `url('${pages[backIndex].path}')`;
+        // Mirror the back page so it reads correctly when flipped
+        back.style.transform = 'rotateY(180deg) scaleX(-1)';
+      } else {
+        back.classList.add('blank');
+        back.style.transform = 'rotateY(180deg)';
+      }
+      
+      container.appendChild(front);
+      container.appendChild(back);
     }
 
-    function nextSpread() {
-      if(isAnimating || currentSpread >= totalSpreads - 1) return;
+    function nextPage() {
+      if(isAnimating) return;
+      
+      const maxSpreads = Math.ceil(totalImages / 2);
+      if(currentSpread >= maxSpreads - 1) return;
       
       isAnimating = true;
       updateControls();
       
-      const currentSpreadEl = spreads[currentSpread];
-      const nextSpreadEl = spreads[currentSpread + 1];
+      const rightContainer = $('#rightContainer');
       
-      // Show both current and next spread
-      currentSpreadEl.element.style.display = 'block';
-      nextSpreadEl.element.style.display = 'block';
+      rightContainer.classList.add('flipping', 'shadow');
       
-      // The right page of current spread flips to reveal next spread
-      const rightPage = currentSpreadEl.rightPageEl;
-      
-      rightPage.classList.add('flipping');
       requestAnimationFrame(() => {
-        rightPage.classList.add('flip-right');
+        rightContainer.classList.add('flip-right');
       });
       
       setTimeout(() => {
-        showSpread(currentSpread + 1);
+        currentSpread++;
+        updateSpreadContent();
+        resetAnimations();
         isAnimating = false;
         updateControls();
         preloadAround(currentSpread);
       }, CONFIG.animationDuration);
     }
 
-    function previousSpread() {
+    function previousPage() {
       if(isAnimating || currentSpread <= 0) return;
       
       isAnimating = true;
       updateControls();
       
-      const currentSpreadEl = spreads[currentSpread];
-      const prevSpreadEl = spreads[currentSpread - 1];
+      const leftContainer = $('#leftContainer');
       
-      // Show both spreads
-      currentSpreadEl.element.style.display = 'block';
-      prevSpreadEl.element.style.display = 'block';
+      leftContainer.classList.add('flipping', 'shadow');
       
-      // The left page of current spread flips back to reveal previous spread
-      const leftPage = currentSpreadEl.leftPageEl;
-      
-      leftPage.classList.add('flipping');
       requestAnimationFrame(() => {
-        leftPage.classList.add('flip-left');
+        leftContainer.classList.add('flip-left');
       });
       
       setTimeout(() => {
-        showSpread(currentSpread - 1);
+        currentSpread--;
+        updateSpreadContent();
+        resetAnimations();
         isAnimating = false;
         updateControls();
         preloadAround(currentSpread);
       }, CONFIG.animationDuration);
     }
 
-    function updateControls(){
-      prevBtn.disabled = (currentSpread <= 0) || isAnimating;
-      nextBtn.disabled = (currentSpread >= totalSpreads - 1) || isAnimating;
+    function resetAnimations() {
+      const containers = [document.getElementById('leftContainer'), document.getElementById('rightContainer')];
+      containers.forEach(container => {
+        if(container) {
+          container.classList.remove('flipping', 'shadow', 'flip-left', 'flip-right');
+        }
+      });
     }
 
-    function preloadAround(index){
+    function updateControls(){
+      const maxSpreads = Math.ceil(totalImages / 2);
+      prevBtn.disabled = (currentSpread <= 0) || isAnimating;
+      nextBtn.disabled = (currentSpread >= maxSpreads - 1) || isAnimating;
+    }
+
+    function preloadAround(spread){
       const paths = [];
       for(let d = -CONFIG.preloadAhead; d <= CONFIG.preloadAhead; d++){
-        const si = index + d;
-        if(si < 0 || si >= spreads.length) continue;
-        const spread = spreads[si];
-        if(spread.leftPage) paths.push(spread.leftPage.path);
-        if(spread.rightPage) paths.push(spread.rightPage.path);
+        const s = spread + d;
+        const leftIndex = s * 2;
+        const rightIndex = s * 2 + 1;
+        
+        [leftIndex, rightIndex, leftIndex + 2, rightIndex + 2].forEach(index => {
+          if(index > 0 && index < pages.length && pages[index]) {
+            paths.push(pages[index].path);
+          }
+        });
       }
+      
       paths.forEach(path => {
         if(preloaded.has(path)) return;
         const img = new Image();
