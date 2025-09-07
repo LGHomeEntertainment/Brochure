@@ -14,7 +14,6 @@
     }
     .wrap{width:min(100%, 900px)}
 
-    /* 높이 고정: 항상 스프레드(2페이지) 기준 비율 */
     .flipbook{
       position:relative; width:100%; aspect-ratio: 1.414;
       background:#fff; border-radius:8px; box-shadow:0 20px 40px rgba(0,0,0,.3); overflow:hidden;
@@ -22,14 +21,13 @@
       -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; -webkit-user-drag:none;
     }
 
-    .sheet{ position:absolute; inset:0; visibility:visible; }
+    .sheet{ position:absolute; inset:0; }
 
     .page{
       position:absolute; top:0; bottom:0; width:50%; overflow:hidden; background:#fff;
       background-position:center; background-size:cover; background-repeat:no-repeat;
       pointer-events:none; backface-visibility:hidden; transform-style:preserve-3d;
-      will-change: transform; transform: translateZ(0); contain: layout paint;
-      transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      will-change: transform; contain: layout paint;
     }
     .page.left { 
       left:0; border-right:1px solid rgba(0,0,0,.06); 
@@ -40,7 +38,6 @@
       transform-origin: left center;
     }
     .page.blank{ background:#fff !important; }
-    .page.hidden{ visibility:hidden; }
 
     /* 중앙 스파인 */
     .flipbook::before{
@@ -49,31 +46,24 @@
       opacity:.25; pointer-events:none;
     }
 
-    /* 더 부드러운 그림자 효과 */
-    .page.flipping::after{
+    /* 페이지 뒤집기 애니메이션 */
+    .page.flipping {
+      transition: transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      z-index: 1000;
+    }
+
+    .page.flipping::after {
       content:''; position:absolute; inset:0; pointer-events:none;
-      background: linear-gradient(90deg, rgba(0,0,0,.15), rgba(0,0,0,0) 60%);
-      opacity: 0;
-      transition: opacity 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+      background: linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,.2) 50%, rgba(0,0,0,0));
+      transition: opacity 0.7s ease;
     }
 
-    .page.flipping.shadow::after{
-      opacity: 1;
-    }
-
-    /* 페이지 뒤집기 상태 */
-    .page.turn-right {
+    .page.flip-right {
       transform: rotateY(-180deg);
-      z-index: 10;
-    }
-    
-    .page.turn-left {
-      transform: rotateY(0deg);
-      z-index: 10;
     }
 
-    .page.preset-left { 
-      transform: rotateY(-180deg); 
+    .page.flip-left {
+      transform: rotateY(180deg);
     }
 
     .controls{ display:flex; justify-content:center; align-items:center; gap:12px; margin-top:20px }
@@ -113,23 +103,23 @@
       maxPagesToCheck: 100,
       loadingTimeout: 5000,
       preloadAhead: 2,
-      animationDuration: 600 // ms
+      animationDuration: 700
     };
 
-    let totalImages = 0, currentSheet = 0, totalSheets = 0, isAnimating = false;
-    const sheets = [];
+    let totalImages = 0, currentSpread = 0, totalSpreads = 0, isAnimating = false;
+    const spreads = []; // Each spread shows 2 pages side by side
     const preloaded = new Set();
 
     const $ = s => document.querySelector(s);
     const flipbook = $('#flipbook'), loading = $('#loading');
     const prevBtn = $('#prevBtn'), nextBtn = $('#nextBtn');
 
-    prevBtn.addEventListener('click', previousSheet);
-    nextBtn.addEventListener('click', nextSheet);
+    prevBtn.addEventListener('click', previousSpread);
+    nextBtn.addEventListener('click', nextSpread);
 
     document.addEventListener('keydown', e=>{
-      if(['ArrowLeft','ArrowUp'].includes(e.key)){ e.preventDefault(); previousSheet(); }
-      if(['ArrowRight','ArrowDown'].includes(e.key)){ e.preventDefault(); nextSheet(); }
+      if(['ArrowLeft','ArrowUp'].includes(e.key)){ e.preventDefault(); previousSpread(); }
+      if(['ArrowRight','ArrowDown'].includes(e.key)){ e.preventDefault(); nextSpread(); }
     });
 
     flipbook.addEventListener('contextmenu', e=>e.preventDefault());
@@ -138,216 +128,193 @@
     async function init(){
       const detected = await detectPages();
       if(detected.length === 0){
-        loading.innerHTML = `<div style="color:#e74c3c;text-align:center"><strong>No pages found</strong><br>폴더에 <code>${CONFIG.imagePrefix}1.jpg</code>, <code>${CONFIG.imagePrefix}2.jpg</code> … 형태로 배치하세요.<br><small>지원: ${CONFIG.imageExtensions.join(', ')}</small></div>`;
+        loading.innerHTML = `<div style="color:#e74c3c;text-align:center"><strong>No pages found</strong><br>Place images in the same folder as this HTML file.<br>Name them: <code>${CONFIG.imagePrefix}1.jpg</code>, <code>${CONFIG.imagePrefix}2.jpg</code>, etc.<br><small>Supported formats: ${CONFIG.imageExtensions.join(', ')}</small></div>`;
         updateControls(); return;
       }
       totalImages = detected.length;
 
-      // 시트 구성
-      sheets.push({ type:'single', align:'right', pages:[ detected[0] ] }); // COVER
-      for(let i=1; i<detected.length; i+=2){
-        if(i+1 < detected.length){ sheets.push({ type:'spread', pages:[ detected[i], detected[i+1] ] }); }
-        else { sheets.push({ type:'single', align:'left', pages:[ detected[i] ] }); } // LAST
+      // Create spreads (2 pages each, except first page alone)
+      if(detected.length > 0) {
+        // First spread: blank + cover page
+        spreads.push({ leftPage: null, rightPage: detected[0] });
+        
+        // Remaining spreads: pairs of pages
+        for(let i = 1; i < detected.length; i += 2) {
+          const leftPage = detected[i] || null;
+          const rightPage = detected[i + 1] || null;
+          spreads.push({ leftPage, rightPage });
+        }
       }
-      totalSheets = sheets.length;
 
-      // DOM + baseZ 기록
-      sheets.forEach((sheet, idx)=>{
-        const el = createSheet(sheet);
-        const baseZ = 1000 - idx;
-        el.style.zIndex = baseZ;
-        el.style.visibility = (idx === 0) ? 'visible' : 'visible';
-        flipbook.appendChild(el);
-        sheet._el = el; sheet.baseZ = baseZ;
-      });
+      totalSpreads = spreads.length;
+      createAllSpreads();
+      showSpread(0);
 
-      hideAllExcept(currentSheet, currentSheet+1);
       loading.style.display = 'none';
       updateControls();
-      preloadAround(currentSheet);
+      preloadAround(currentSpread);
     }
 
-    function createSheet(sheet){
-      const el = document.createElement('div');
-      el.className = 'sheet';
-      if(sheet.type === 'single'){
-        const blankSide = sheet.align === 'left' ? 'right' : 'left';
-        el.appendChild(makeBlankPage(blankSide));
-        el.appendChild(makePage(sheet.pages[0], sheet.align));
-      } else {
-        el.appendChild(makePage(sheet.pages[0], 'left'));
-        el.appendChild(makePage(sheet.pages[1], 'right'));
-      }
-      return el;
+    function createAllSpreads() {
+      spreads.forEach((spread, index) => {
+        const spreadEl = document.createElement('div');
+        spreadEl.className = 'sheet';
+        spreadEl.style.zIndex = 1000 - index;
+        
+        // Left page
+        const leftPage = document.createElement('div');
+        leftPage.className = 'page left';
+        if(spread.leftPage) {
+          leftPage.style.backgroundImage = `url('${spread.leftPage.path}')`;
+        } else {
+          leftPage.classList.add('blank');
+        }
+        
+        // Right page  
+        const rightPage = document.createElement('div');
+        rightPage.className = 'page right';
+        if(spread.rightPage) {
+          rightPage.style.backgroundImage = `url('${spread.rightPage.path}')`;
+        } else {
+          rightPage.classList.add('blank');
+        }
+        
+        spreadEl.appendChild(leftPage);
+        spreadEl.appendChild(rightPage);
+        flipbook.appendChild(spreadEl);
+        
+        spread.element = spreadEl;
+        spread.leftPageEl = leftPage;
+        spread.rightPageEl = rightPage;
+      });
     }
 
-    function makeBlankPage(side){
-      const d = document.createElement('div');
-      d.className = 'page blank ' + (side==='left' ? 'left' : 'right');
-      return d;
+    function showSpread(index) {
+      spreads.forEach((spread, i) => {
+        spread.element.style.display = (i === index) ? 'block' : 'none';
+        resetPageStyles(spread);
+      });
+      currentSpread = index;
     }
 
-    function makePage(data, side){
-      const d = document.createElement('div');
-      d.className = 'page ' + (side==='left' ? 'left' : 'right');
-      d.style.backgroundImage = `url('${data.path}')`;
-      return d;
+    function resetPageStyles(spread) {
+      [spread.leftPageEl, spread.rightPageEl].forEach(page => {
+        page.classList.remove('flipping', 'flip-right', 'flip-left');
+        page.style.transform = '';
+      });
+    }
+
+    function nextSpread() {
+      if(isAnimating || currentSpread >= totalSpreads - 1) return;
+      
+      isAnimating = true;
+      updateControls();
+      
+      const currentSpreadEl = spreads[currentSpread];
+      const nextSpreadEl = spreads[currentSpread + 1];
+      
+      // Show both current and next spread
+      currentSpreadEl.element.style.display = 'block';
+      nextSpreadEl.element.style.display = 'block';
+      
+      // The right page of current spread flips to reveal next spread
+      const rightPage = currentSpreadEl.rightPageEl;
+      
+      rightPage.classList.add('flipping');
+      requestAnimationFrame(() => {
+        rightPage.classList.add('flip-right');
+      });
+      
+      setTimeout(() => {
+        showSpread(currentSpread + 1);
+        isAnimating = false;
+        updateControls();
+        preloadAround(currentSpread);
+      }, CONFIG.animationDuration);
+    }
+
+    function previousSpread() {
+      if(isAnimating || currentSpread <= 0) return;
+      
+      isAnimating = true;
+      updateControls();
+      
+      const currentSpreadEl = spreads[currentSpread];
+      const prevSpreadEl = spreads[currentSpread - 1];
+      
+      // Show both spreads
+      currentSpreadEl.element.style.display = 'block';
+      prevSpreadEl.element.style.display = 'block';
+      
+      // The left page of current spread flips back to reveal previous spread
+      const leftPage = currentSpreadEl.leftPageEl;
+      
+      leftPage.classList.add('flipping');
+      requestAnimationFrame(() => {
+        leftPage.classList.add('flip-left');
+      });
+      
+      setTimeout(() => {
+        showSpread(currentSpread - 1);
+        isAnimating = false;
+        updateControls();
+        preloadAround(currentSpread);
+      }, CONFIG.animationDuration);
     }
 
     function updateControls(){
-      prevBtn.disabled = (currentSheet <= 0) || isAnimating;
-      nextBtn.disabled = (currentSheet >= totalSheets - 1) || isAnimating;
-    }
-
-    function hideAllExcept(a, b){
-      sheets.forEach((s, i)=>{
-        s._el.style.visibility = (i === a || i === b) ? 'visible' : 'hidden';
-        resetPages(s._el);
-        s._el.style.zIndex = s.baseZ;
-      });
-    }
-
-    function resetPages(el){
-      el.querySelectorAll('.page').forEach(p=>{
-        p.classList.remove('hidden','turn-right','turn-left','preset-left','flipping','shadow');
-        p.style.transform = '';
-      });
-    }
-
-    function nextSheet(){
-      if(isAnimating || currentSheet >= totalSheets-1) return;
-      isAnimating = true; updateControls();
-
-      const curIndex = currentSheet;
-      const nxtIndex = currentSheet + 1;
-      const cur = sheets[curIndex]._el;
-      const nxt = sheets[nxtIndex]._el;
-
-      hideAllExcept(curIndex, nxtIndex);
-
-      const leftCur = cur.querySelector('.page.left'); 
-      const rightCur = cur.querySelector('.page.right');
-      
-      if(!rightCur){ 
-        isAnimating=false; updateControls(); return; 
-      }
-
-      // 즉시 왼쪽 숨기기
-      if(leftCur) leftCur.classList.add('hidden');
-
-      preloadAround(nxtIndex);
-
-      // 부드러운 애니메이션 시작
-      rightCur.classList.add('flipping', 'shadow');
-      
-      // 작은 지연 후 실제 변형 적용
-      requestAnimationFrame(() => {
-        rightCur.classList.add('turn-right');
-      });
-
-      // 애니메이션 완료 대기
-      setTimeout(() => {
-        cur.style.visibility = 'hidden';
-        if(leftCur) leftCur.classList.remove('hidden');
-        currentSheet = nxtIndex;
-        hideAllExcept(currentSheet, currentSheet+1);
-        isAnimating = false; 
-        updateControls();
-      }, CONFIG.animationDuration);
-    }
-
-    function previousSheet(){
-      if(isAnimating || currentSheet <= 0) return;
-      isAnimating = true; updateControls();
-
-      const prevIndex = currentSheet - 1;
-      const prev = sheets[prevIndex]._el;
-      const cur = sheets[currentSheet]._el;
-
-      hideAllExcept(prevIndex, currentSheet);
-
-      const curZ = parseInt(cur.style.zIndex, 10) || sheets[currentSheet].baseZ;
-      const originalZ = prev.style.zIndex;
-      prev.style.zIndex = (curZ + 1).toString();
-
-      const rightCur = cur.querySelector('.page.right');
-      const leftPrev = prev.querySelector('.page.left');
-
-      if(!leftPrev){
-        prev.style.zIndex = originalZ;
-        isAnimating=false; updateControls(); return;
-      }
-
-      // 즉시 오른쪽 숨기기
-      if(rightCur) rightCur.classList.add('hidden');
-
-      preloadAround(prevIndex);
-
-      // 왼쪽 페이지를 초기 위치(-180도)로 설정
-      leftPrev.style.transform = 'rotateY(-180deg)';
-      leftPrev.classList.add('flipping', 'shadow');
-
-      // 부드럽게 0도로 회전
-      requestAnimationFrame(() => {
-        leftPrev.classList.add('turn-left');
-      });
-
-      // 애니메이션 완료 대기
-      setTimeout(() => {
-        cur.style.visibility = 'hidden';
-        prev.style.zIndex = originalZ;
-        if(rightCur) rightCur.classList.remove('hidden');
-        currentSheet = prevIndex;
-        hideAllExcept(currentSheet, currentSheet+1);
-        
-        // 클린업
-        leftPrev.classList.remove('preset-left','turn-left','flipping','shadow');
-        leftPrev.style.transform = '';
-        
-        isAnimating = false; 
-        updateControls();
-      }, CONFIG.animationDuration);
+      prevBtn.disabled = (currentSpread <= 0) || isAnimating;
+      nextBtn.disabled = (currentSpread >= totalSpreads - 1) || isAnimating;
     }
 
     function preloadAround(index){
       const paths = [];
-      for(let d=-CONFIG.preloadAhead; d<=CONFIG.preloadAhead; d++){
+      for(let d = -CONFIG.preloadAhead; d <= CONFIG.preloadAhead; d++){
         const si = index + d;
-        if(si<0 || si>=sheets.length) continue;
-        const s = sheets[si];
-        if(s.type==='single') paths.push(s.pages[0].path);
-        else paths.push(s.pages[0].path, s.pages[1].path);
+        if(si < 0 || si >= spreads.length) continue;
+        const spread = spreads[si];
+        if(spread.leftPage) paths.push(spread.leftPage.path);
+        if(spread.rightPage) paths.push(spread.rightPage.path);
       }
-      paths.forEach(p=>{
-        if(preloaded.has(p)) return;
-        const im = new Image();
-        im.decoding = 'async'; im.loading = 'eager'; im.src = p;
-        preloaded.add(p);
+      paths.forEach(path => {
+        if(preloaded.has(path)) return;
+        const img = new Image();
+        img.decoding = 'async'; 
+        img.loading = 'eager'; 
+        img.src = path;
+        preloaded.add(path);
       });
     }
 
     async function detectPages(){
       const found = [];
-      for(let i=1;i<=CONFIG.maxPagesToCheck;i++){
-        let ok=false, pickedPath='';
+      for(let i = 1; i <= CONFIG.maxPagesToCheck; i++){
+        let ok = false, pickedPath = '';
         for(const ext of CONFIG.imageExtensions){
           const src = `${CONFIG.imagePrefix}${i}.${ext}`;
           const exists = await checkImage(src);
-          if(exists){ ok=true; pickedPath=src; break; }
+          if(exists){ ok = true; pickedPath = src; break; }
         }
-        if(ok){ found.push({number:i, path:pickedPath}); }
-        else if(found.length>0){ break; }
+        if(ok){ found.push({number: i, path: pickedPath}); }
+        else if(found.length > 0){ break; }
       }
       return found;
     }
 
     function checkImage(src){
-      return new Promise((resolve)=>{
+      return new Promise((resolve) => {
         const img = new Image();
-        let done=false;
-        const to = setTimeout(()=>{ if(!done){ done=true; resolve(false); } }, CONFIG.loadingTimeout);
-        img.onload = ()=>{ if(!done){ done=true; clearTimeout(to); resolve(true); } };
-        img.onerror = ()=>{ if(!done){ done=true; clearTimeout(to); resolve(false); } };
+        let done = false;
+        const timeout = setTimeout(() => { 
+          if(!done){ done = true; resolve(false); } 
+        }, CONFIG.loadingTimeout);
+        
+        img.onload = () => { 
+          if(!done){ done = true; clearTimeout(timeout); resolve(true); } 
+        };
+        img.onerror = () => { 
+          if(!done){ done = true; clearTimeout(timeout); resolve(false); } 
+        };
         img.src = src + `?v=${Date.now()}`;
       });
     }
