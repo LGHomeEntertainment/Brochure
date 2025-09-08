@@ -31,6 +31,7 @@
       width: 50%;
       height: 100%;
       transform-style: preserve-3d;
+      overflow:hidden;
     }
 
     .page {
@@ -45,32 +46,35 @@
 
     .page.front { z-index: 2; }
     .page.back { transform: rotateY(180deg); z-index: 1; }
-    .page.blank { background:#fff !important; }
+    .page.blank { background: #fff !important; }
 
-    .page-container.left { transform-origin: right center; border-right:1px solid rgba(0,0,0,.06); }
+    .page-container.left { transform-origin: right center; border-right: 1px solid rgba(0,0,0,.06); }
     .page-container.right { transform-origin: left center; }
 
     .page-container.flipping {
       transition: transform 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
       z-index: 1000;
     }
+
     .page-container.flip-left { transform: rotateY(180deg); }
     .page-container.flip-right { transform: rotateY(-180deg); }
 
     .page-container.flipping::after {
       content: '';
       position: absolute;
-      top:0;left:0;right:0;bottom:0;
-      background:linear-gradient(90deg,rgba(0,0,0,0.1)0%,rgba(0,0,0,0.3)50%,rgba(0,0,0,0.1)100%);
-      z-index: 10; opacity:0; transition: opacity 0.8s ease;
-      pointer-events:none;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(90deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.3) 50%, rgba(0,0,0,0.1) 100%);
+      z-index: 10;
+      opacity: 0;
+      transition: opacity 0.8s ease;
+      pointer-events: none;
     }
-    .page-container.flipping.shadow::after { opacity:1; }
+    .page-container.flipping.shadow::after { opacity: 1; }
 
     .flipbook::before{
       content:''; position:absolute; top:0; bottom:0; left:50%; width:2px; transform:translateX(-1px);
-      background:linear-gradient(180deg,rgba(0,0,0,.12),rgba(0,0,0,0)40%,rgba(0,0,0,.12));
-      opacity:.25; pointer-events:none; z-index:500;
+      background: linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,0) 40%, rgba(0,0,0,.12));
+      opacity:.25; pointer-events:none; z-index: 500;
     }
 
     .controls{ display:flex; justify-content:center; align-items:center; gap:12px; margin-top:20px }
@@ -87,8 +91,8 @@
     .spinner{ width:30px; height:30px; border:3px solid #f3f3f3; border-top:3px solid #e60012; border-radius:50%; animation:spin .8s linear infinite }
     @keyframes spin{ to{ transform: rotate(360deg) } }
 
-    @media (max-width:768px){ .wrap{width:90vw} .nav-btn{ padding:10px 16px; font-size:14px } }
-    @media (prefers-reduced-motion:reduce){ .page-container{ transition:none !important } }
+    @media (max-width: 768px){ .wrap{width:90vw} .nav-btn{ padding:10px 16px; font-size:14px } }
+    @media (prefers-reduced-motion: reduce){ .page-container{ transition:none !important } }
   </style>
 </head>
 <body>
@@ -96,221 +100,213 @@
     <div class="flipbook" id="flipbook" aria-label="Flipbook">
       <div class="loading" id="loading"><div class="spinner"></div><div>Loading pages…</div></div>
     </div>
+
     <div class="controls" aria-label="Pagination controls">
       <button class="nav-btn" id="prevBtn">← Previous</button>
       <button class="nav-btn" id="nextBtn">Next →</button>
     </div>
   </div>
 
-<script>
-const CONFIG = {
-  imagePrefix: 'Pg',
-  imageExtensions: ['jpg','jpeg','png','webp'],
-  maxPagesToCheck: 100,
-  loadingTimeout: 5000,
-  preloadAhead: 2,
-  animationDuration: 800
-};
+  <script>
+    const CONFIG = {
+      imagePrefix: 'Pg',
+      imageExtensions: ['jpg','jpeg','png','webp'],
+      maxPagesToCheck: 100,
+      loadingTimeout: 5000,
+      preloadAhead: 3, // bumped up
+      animationDuration: 800
+    };
 
-let totalImages = 0, currentSpread = 0, isAnimating = false;
-const pages = [];
-const preloaded = new Set();
+    let totalImages = 0, currentSpread = 0, isAnimating = false;
+    const pages = [];
+    const preloaded = new Set();
 
-const $ = s => document.querySelector(s);
-const flipbook = $('#flipbook'), loading = $('#loading');
-const prevBtn = $('#prevBtn'), nextBtn = $('#nextBtn');
+    const $ = s => document.querySelector(s);
+    const flipbook = $('#flipbook'), loading = $('#loading');
+    const prevBtn = $('#prevBtn'), nextBtn = $('#nextBtn');
 
-prevBtn.addEventListener('click', previousPage);
-nextBtn.addEventListener('click', nextPage);
+    prevBtn.addEventListener('click', previousPage);
+    nextBtn.addEventListener('click', nextPage);
 
-document.addEventListener('keydown', e=>{
-  if(['ArrowLeft','ArrowUp'].includes(e.key)){ e.preventDefault(); previousPage(); }
-  if(['ArrowRight','ArrowDown'].includes(e.key)){ e.preventDefault(); nextPage(); }
-});
-
-flipbook.addEventListener('contextmenu', e=>e.preventDefault());
-document.addEventListener('dragstart', e=>e.preventDefault());
-
-async function init(){
-  const detected = await detectPages();
-  if(detected.length === 0){
-    loading.innerHTML = `<div style="color:#e74c3c;text-align:center"><strong>No pages found</strong><br>Place images in the same folder as this HTML file.<br>Name them: <code>${CONFIG.imagePrefix}1.jpg</code>, <code>${CONFIG.imagePrefix}2.jpg</code>, etc.<br><small>Supported formats: ${CONFIG.imageExtensions.join(', ')}</small></div>`;
-    updateControls(); return;
-  }
-
-  pages.length = 0;
-  pages.push(null); // page 0 blank cover
-  detected.forEach(p=>pages.push(p));
-
-  totalImages = pages.length - 1;
-  createSpread();
-  loading.style.display = 'none';
-  updateControls();
-  preloadAround(currentSpread);
-}
-
-function createSpread() {
-  const spread = document.createElement('div');
-  spread.className = 'spread';
-  const leftContainer = document.createElement('div');
-  leftContainer.className = 'page-container left'; leftContainer.id = 'leftContainer';
-  const rightContainer = document.createElement('div');
-  rightContainer.className = 'page-container right'; rightContainer.id = 'rightContainer';
-  spread.appendChild(leftContainer); spread.appendChild(rightContainer);
-  flipbook.appendChild(spread);
-  updateSpreadContent();
-}
-
-function updateSpreadContent() {
-  const leftContainer = $('#leftContainer'), rightContainer = $('#rightContainer');
-  leftContainer.innerHTML = ''; rightContainer.innerHTML = '';
-  const leftPageIndex = currentSpread * 2;
-  const rightPageIndex = currentSpread * 2 + 1;
-  createPagePair(leftContainer, leftPageIndex, leftPageIndex - 2);
-  createPagePair(rightContainer, rightPageIndex, rightPageIndex + 2);
-}
-
-function createPagePair(container, frontIndex, backIndex) {
-  const front = document.createElement('div'); front.className = 'page front';
-  if(frontIndex < pages.length && pages[frontIndex]) {
-    front.style.backgroundImage = `url('${pages[frontIndex].path}')`;
-  } else front.classList.add('blank');
-  const back = document.createElement('div'); back.className = 'page back';
-  if(backIndex >= 0 && backIndex < pages.length && pages[backIndex]) {
-    back.style.backgroundImage = `url('${pages[backIndex].path}')`;
-  } else back.classList.add('blank');
-  container.appendChild(front); container.appendChild(back);
-}
-
-function nextPage() {
-  if(isAnimating) return;
-  const maxSpreads = Math.ceil(totalImages / 2);
-  if(currentSpread >= maxSpreads - 1) return;
-  isAnimating = true; updateControls();
-
-  const leftContainer = $('#leftContainer');
-  const rightContainer = $('#rightContainer');
-
-  const leftIndex = (currentSpread + 1) * 2;
-  const rightIndex = (currentSpread + 1) * 2 + 1;
-
-  // preload back of Pg1 = Pg2
-  const back = rightContainer.querySelector('.page.back');
-  if(pages[leftIndex]) back.style.backgroundImage = `url('${pages[leftIndex].path}')`;
-  else back.classList.add('blank');
-
-  // place Pg3 underneath
-  const nextRight = document.createElement('div');
-  nextRight.className = 'page';
-  if(pages[rightIndex]) nextRight.style.backgroundImage = `url('${pages[rightIndex].path}')`;
-  else nextRight.classList.add('blank');
-  nextRight.style.zIndex = 0;
-  rightContainer.appendChild(nextRight);
-
-  rightContainer.classList.add('flipping','shadow');
-  requestAnimationFrame(()=> rightContainer.classList.add('flip-right'));
-
-  setTimeout(()=>{
-    currentSpread++;
-    updateSpreadContent();
-    resetAnimations();
-    isAnimating = false;
-    updateControls();
-    preloadAround(currentSpread);
-  }, CONFIG.animationDuration);
-}
-
-function previousPage() {
-  if(isAnimating || currentSpread <= 0) return;
-  isAnimating = true; updateControls();
-
-  const leftContainer = $('#leftContainer');
-  const rightContainer = $('#rightContainer');
-
-  const prevLeftIndex = (currentSpread - 1) * 2;
-  const prevRightIndex = (currentSpread - 1) * 2 + 1;
-
-  // preload back of current left = previous right
-  const back = leftContainer.querySelector('.page.back');
-  if(pages[prevRightIndex]) back.style.backgroundImage = `url('${pages[prevRightIndex].path}')`;
-  else back.classList.add('blank');
-
-  // place previous left underneath
-  const prevLeft = document.createElement('div');
-  prevLeft.className = 'page';
-  if(pages[prevLeftIndex]) prevLeft.style.backgroundImage = `url('${pages[prevLeftIndex].path}')`;
-  else prevLeft.classList.add('blank');
-  prevLeft.style.zIndex = 0;
-  leftContainer.appendChild(prevLeft);
-
-  leftContainer.classList.add('flipping','shadow');
-  requestAnimationFrame(()=> leftContainer.classList.add('flip-left'));
-
-  setTimeout(()=>{
-    currentSpread--;
-    updateSpreadContent();
-    resetAnimations();
-    isAnimating = false;
-    updateControls();
-    preloadAround(currentSpread);
-  }, CONFIG.animationDuration);
-}
-
-function resetAnimations() {
-  ['leftContainer','rightContainer'].forEach(id=>{
-    const c = document.getElementById(id);
-    if(c) c.classList.remove('flipping','shadow','flip-left','flip-right');
-  });
-}
-
-function updateControls(){
-  const maxSpreads = Math.ceil(totalImages / 2);
-  prevBtn.disabled = (currentSpread <= 0) || isAnimating;
-  nextBtn.disabled = (currentSpread >= maxSpreads - 1) || isAnimating;
-}
-
-function preloadAround(spread){
-  const paths=[];
-  for(let d=-CONFIG.preloadAhead; d<=CONFIG.preloadAhead; d++){
-    const s = spread+d;
-    const leftIndex=s*2, rightIndex=s*2+1;
-    [leftIndex,rightIndex,leftIndex-2,rightIndex+2].forEach(index=>{
-      if(index>0 && index<pages.length && pages[index]) paths.push(pages[index].path);
+    document.addEventListener('keydown', e=>{
+      if(['ArrowLeft','ArrowUp'].includes(e.key)){ e.preventDefault(); previousPage(); }
+      if(['ArrowRight','ArrowDown'].includes(e.key)){ e.preventDefault(); nextPage(); }
     });
-  }
-  paths.forEach(path=>{
-    if(preloaded.has(path)) return;
-    const img=new Image(); img.decoding='async'; img.loading='eager'; img.src=path;
-    preloaded.add(path);
-  });
-}
 
-async function detectPages(){
-  const found=[];
-  for(let i=1;i<=CONFIG.maxPagesToCheck;i++){
-    let ok=false, pickedPath='';
-    for(const ext of CONFIG.imageExtensions){
-      const src=`${CONFIG.imagePrefix}${i}.${ext}`;
-      const exists=await checkImage(src);
-      if(exists){ok=true;pickedPath=src;break;}
+    flipbook.addEventListener('contextmenu', e=>e.preventDefault());
+    document.addEventListener('dragstart', e=>e.preventDefault());
+
+    async function init(){
+      const detected = await detectPages();
+      if(detected.length === 0){
+        loading.innerHTML = `<div style="color:#e74c3c;text-align:center"><strong>No pages found</strong><br>Place images in the same folder as this HTML file.<br>Name them: <code>${CONFIG.imagePrefix}1.jpg</code>, <code>${CONFIG.imagePrefix}2.jpg</code>, etc.<br><small>Supported formats: ${CONFIG.imageExtensions.join(', ')}</small></div>`;
+        updateControls(); return;
+      }
+
+      pages.length = 0;
+      pages.push(null); // blank left cover
+      detected.forEach(page => pages.push(page));
+
+      totalImages = pages.length - 1;
+      createSpread();
+      
+      loading.style.display = 'none';
+      updateControls();
+      preloadAround(currentSpread);
     }
-    if(ok) found.push({number:i,path:pickedPath});
-    else if(found.length>0) break;
-  }
-  return found;
-}
 
-function checkImage(src){
-  return new Promise((resolve)=>{
-    const img=new Image(); let done=false;
-    const timeout=setTimeout(()=>{ if(!done){done=true;resolve(false);} },CONFIG.loadingTimeout);
-    img.onload=()=>{ if(!done){done=true;clearTimeout(timeout);resolve(true);} };
-    img.onerror=()=>{ if(!done){done=true;clearTimeout(timeout);resolve(false);} };
-    img.src=src+`?v=${Date.now()}`;
-  });
-}
+    function createSpread() {
+      const spread = document.createElement('div');
+      spread.className = 'spread';
+      spread.innerHTML = `
+        <div class="page-container left" id="leftContainer"></div>
+        <div class="page-container right" id="rightContainer"></div>
+      `;
+      flipbook.appendChild(spread);
+      updateSpreadContent();
+    }
 
-init();
-</script>
+    function updateSpreadContent() {
+      const left = $('#leftContainer');
+      const right = $('#rightContainer');
+      left.innerHTML = '';
+      right.innerHTML = '';
+
+      const leftIndex = currentSpread * 2;
+      const rightIndex = currentSpread * 2 + 1;
+
+      // Left container: current left page
+      createPagePair(left, leftIndex, leftIndex + 2);
+
+      // Right container: current right page (front/back)
+      createPagePair(right, rightIndex, rightIndex + 2);
+
+      // Prepare the *next* right page (so it's visible immediately under flip)
+      const nextRightIndex = (currentSpread + 1) * 2 + 1;
+      if(nextRightIndex < pages.length && pages[nextRightIndex]){
+        const nextRight = document.createElement('div');
+        nextRight.className = 'page future-right';
+        nextRight.style.backgroundImage = `url('${pages[nextRightIndex].path}')`;
+        nextRight.style.zIndex = 0;
+        right.appendChild(nextRight);
+      }
+    }
+
+    function createPagePair(container, frontIndex, backIndex) {
+      const front = document.createElement('div');
+      front.className = 'page front';
+      if(frontIndex < pages.length && pages[frontIndex]) {
+        front.style.backgroundImage = `url('${pages[frontIndex].path}')`;
+      } else { front.classList.add('blank'); }
+
+      const back = document.createElement('div');
+      back.className = 'page back';
+      if(backIndex < pages.length && pages[backIndex]) {
+        back.style.backgroundImage = `url('${pages[backIndex].path}')`;
+      } else { back.classList.add('blank'); }
+
+      container.appendChild(front);
+      container.appendChild(back);
+    }
+
+    function nextPage() {
+      if(isAnimating) return;
+      const maxSpreads = Math.ceil(totalImages / 2);
+      if(currentSpread >= maxSpreads - 1) return;
+
+      isAnimating = true;
+      updateControls();
+
+      const rightContainer = $('#rightContainer');
+      rightContainer.classList.add('flipping', 'shadow');
+      requestAnimationFrame(() => rightContainer.classList.add('flip-right'));
+
+      setTimeout(() => {
+        currentSpread++;
+        updateSpreadContent();
+        resetAnimations();
+        isAnimating = false;
+        updateControls();
+        preloadAround(currentSpread);
+      }, CONFIG.animationDuration);
+    }
+
+    function previousPage() {
+      if(isAnimating || currentSpread <= 0) return;
+      isAnimating = true;
+      updateControls();
+
+      const leftContainer = $('#leftContainer');
+      leftContainer.classList.add('flipping', 'shadow');
+      requestAnimationFrame(() => leftContainer.classList.add('flip-left'));
+
+      setTimeout(() => {
+        currentSpread--;
+        updateSpreadContent();
+        resetAnimations();
+        isAnimating = false;
+        updateControls();
+        preloadAround(currentSpread);
+      }, CONFIG.animationDuration);
+    }
+
+    function resetAnimations() {
+      ['leftContainer','rightContainer'].forEach(id=>{
+        const c = document.getElementById(id);
+        if(c) c.classList.remove('flipping','shadow','flip-left','flip-right');
+      });
+    }
+
+    function updateControls(){
+      const maxSpreads = Math.ceil(totalImages / 2);
+      prevBtn.disabled = (currentSpread <= 0) || isAnimating;
+      nextBtn.disabled = (currentSpread >= maxSpreads - 1) || isAnimating;
+    }
+
+    function preloadAround(spread){
+      const paths = [];
+      for(let d=-CONFIG.preloadAhead; d<=CONFIG.preloadAhead; d++){
+        const s = spread+d;
+        const leftIndex = s*2, rightIndex = s*2+1;
+        [leftIndex,rightIndex,leftIndex+2,rightIndex+2].forEach(i=>{
+          if(i>0 && i<pages.length && pages[i]) paths.push(pages[i].path);
+        });
+      }
+      paths.forEach(path=>{
+        if(preloaded.has(path)) return;
+        const img = new Image();
+        img.decoding = 'async';
+        img.loading = 'eager';
+        img.src = path + `?v=${Date.now()}`;
+        preloaded.add(path);
+      });
+    }
+
+    async function detectPages(){
+      const found=[]; 
+      for(let i=1;i<=CONFIG.maxPagesToCheck;i++){
+        let ok=false,pickedPath='';
+        for(const ext of CONFIG.imageExtensions){
+          const src=`${CONFIG.imagePrefix}${i}.${ext}`;
+          if(await checkImage(src)){ ok=true; pickedPath=src; break; }
+        }
+        if(ok) found.push({number:i,path:pickedPath});
+        else if(found.length>0) break;
+      }
+      return found;
+    }
+
+    function checkImage(src){
+      return new Promise((resolve)=>{
+        const img=new Image(); let done=false;
+        const timeout=setTimeout(()=>{ if(!done){done=true; resolve(false);} },CONFIG.loadingTimeout);
+        img.onload=()=>{ if(!done){done=true; clearTimeout(timeout); resolve(true);} };
+        img.onerror=()=>{ if(!done){done=true; clearTimeout(timeout); resolve(false);} };
+        img.src=src+`?v=${Date.now()}`;
+      });
+    }
+
+    init();
+  </script>
 </body>
 </html>
