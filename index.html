@@ -10,29 +10,36 @@
   <script src="https://cdn.jsdelivr.net/gh/blasten/turn.js/turn.min.js"></script>
 
   <style>
-    body{
+    body {
       font-family: Arial, sans-serif;
       background: linear-gradient(135deg,#ff6b6b 0%,#a50034 100%);
-      min-height:100vh;
-      display:flex; flex-direction:column;
-      align-items:center; justify-content:center;
-      padding:20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
     }
-    .flipbook{
-      width: 90vw; max-width: 900px;
-      height: calc(90vw * 1.414); max-height: 1270px;
+    .flipbook {
       box-shadow: 0 20px 40px rgba(0,0,0,.3);
       background:#fff;
       border-radius: 8px;
-      display:none; /* hide until ready */
+      display:none; /* hidden until ready */
+      margin: auto;
     }
-    .flipbook .page{
+    .flipbook .page {
       background-color:#fff;
       background-size: cover;
       background-position:center;
     }
-    .controls{ display:none; gap:12px; margin-top:20px }
-    .nav-btn{ padding:12px 20px; font-weight:bold; border:none; border-radius:999px; cursor:pointer; }
+    .controls { display:none; gap:12px; margin-top:20px }
+    .nav-btn {
+      padding:12px 20px;
+      font-weight:bold;
+      border:none;
+      border-radius:999px;
+      cursor:pointer;
+    }
 
     /* Spinner */
     .spinner{
@@ -43,13 +50,8 @@
       animation: spin 1s linear infinite;
       margin-bottom:20px;
     }
-    @keyframes spin{
-      0% { transform: rotate(0deg);}
-      100% { transform: rotate(360deg);}
-    }
-    .loading-msg{
-      color:#fff; font-size:1.2rem; text-align:center;
-    }
+    @keyframes spin{ 0%{transform:rotate(0)} 100%{transform:rotate(360deg)} }
+    .loading-msg{ color:#fff; font-size:1.2rem; text-align:center; }
   </style>
 </head>
 <body>
@@ -67,7 +69,7 @@
   </div>
 
   <script>
-    const PREFIX = "pg";  // or "images/pg" if in /images/
+    const PREFIX = "pg";  // change if images are in folder: "images/pg"
     const EXTENSIONS = ["jpg","jpeg","png","webp"];
     const MAX_PAGES = 200;
 
@@ -81,7 +83,7 @@
           if(exists){ ok=true; path=src; break; }
         }
         if(ok) found.push(path);
-        else if(found.length>0) break;
+        else if(found.length>0) break; // stop when gap found
       }
       return found;
     }
@@ -91,7 +93,7 @@
         const img = new Image();
         img.onload = ()=>resolve(true);
         img.onerror = ()=>resolve(false);
-        img.src = src + "?v=" + Date.now();
+        img.src = src + "?v=" + Date.now(); // cache busting
       });
     }
 
@@ -100,9 +102,9 @@
       document.getElementById("loading").style.display="none";
 
       if(pages.length===0){
-        document.querySelector("#flipbook").style.display="flex";
-        document.querySelector("#flipbook").innerHTML =
-          "<div style='padding:40px;text-align:center;width:100%;color:#000'>No pages found</div>";
+        const fb = document.querySelector("#flipbook");
+        fb.style.display="flex";
+        fb.innerHTML = "<div style='padding:40px;text-align:center;width:100%;color:#000'>No pages found</div>";
         return;
       }
 
@@ -117,21 +119,40 @@
       flipbook.style.display="block";
       document.getElementById("controls").style.display="flex";
 
+      // init turn.js
       $('#flipbook').turn({
-        width: 900,
-        height: 1270,
         autoCenter: true,
         gradients: true,
         elevation: 50,
         display: window.innerWidth < 768 ? "single" : "double"
       });
 
+      // navigation
       $('#prevBtn').on("click", ()=> $('#flipbook').turn("previous"));
       $('#nextBtn').on("click", ()=> $('#flipbook').turn("next"));
 
-      $(window).on("resize", function(){
-        $('#flipbook').turn("display", window.innerWidth < 768 ? "single" : "double");
-      });
+      // responsive sizing
+      function resizeFlipbook(){
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
+        // maintain A4 ratio ~ 1:1.414
+        let targetW = Math.min(vw * 0.9, 1200); // keep 10% padding
+        let targetH = targetW * 1.414;
+
+        // If too tall, shrink by height instead
+        if(targetH > vh * 0.85){
+          targetH = vh * 0.85;
+          targetW = targetH / 1.414;
+        }
+
+        $('#flipbook').turn('size', targetW, targetH);
+        flipbook.style.width = targetW + "px";
+        flipbook.style.height = targetH + "px";
+      }
+
+      resizeFlipbook();
+      window.addEventListener("resize", resizeFlipbook);
     }
 
     init();
