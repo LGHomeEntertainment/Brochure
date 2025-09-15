@@ -3,175 +3,141 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MS Digital Brochure</title>
-
-  <!-- jQuery + Turn.js -->
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/blasten/turn.js/turn.min.js"></script>
-
+  <title>Flipbook</title>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/4/turn.min.js"></script>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg,#ff6b6b 0%,#a50034 100%);
-      min-height: 100vh;
+      margin: 0;
+      background: #a00; /* red backdrop */
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Loading overlay */
+    #loading {
+      position: fixed;
+      inset: 0;
+      background: #a00;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 999;
+      color: #fff;
+      font-family: sans-serif;
+    }
+
+    #spinner {
+      border: 6px solid rgba(255,255,255,0.3);
+      border-top: 6px solid #fff;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 12px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Container for book + buttons */
+    .book-container {
       display: flex;
       flex-direction: column;
       align-items: center;
+      height: 100%;
+      width: 100%;
       justify-content: center;
-      margin: 0;
-    }
-    .flipbook {
-      box-shadow: 0 20px 40px rgba(0,0,0,.3);
-      background:#fff;
-      border-radius: 8px;
-      display:none; /* hidden until ready */
-      margin: auto;
-    }
-    .flipbook .page {
-      background-color:#fff;
-      background-size: cover;
-      background-position:center;
-    }
-    .controls { display:none; gap:12px; margin-top:20px }
-    .nav-btn {
-      padding:12px 20px;
-      font-weight:bold;
-      border:none;
-      border-radius:999px;
-      cursor:pointer;
+      padding: 1rem;
+      box-sizing: border-box;
     }
 
-    /* Spinner */
-    .spinner{
-      border:6px solid rgba(255,255,255,0.3);
-      border-top:6px solid #fff;
-      border-radius:50%;
-      width:60px; height:60px;
-      animation: spin 1s linear infinite;
-      margin-bottom:20px;
+    .book {
+      box-shadow: 0 0 15px rgba(0,0,0,0.5);
+      background: white;
     }
-    @keyframes spin{ 0%{transform:rotate(0)} 100%{transform:rotate(360deg)} }
-    .loading-msg{ color:#fff; font-size:1.2rem; text-align:center; }
+
+    /* Portrait default */
+    .book {
+      width: 90vw;
+      max-width: 600px;
+      aspect-ratio: 3/4;
+    }
+
+    /* Landscape override */
+    @media (orientation: landscape) {
+      .book {
+        width: 90vw;
+        max-width: 90vw;
+        max-height: 80vh;
+        aspect-ratio: 4/3;
+      }
+    }
+
+    .controls {
+      margin-top: 0.5rem;
+    }
+
+    .controls button {
+      padding: 0.5rem 1rem;
+      margin: 0 0.25rem;
+      border: none;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .controls button:hover {
+      background: #eee;
+    }
   </style>
 </head>
 <body>
-  <!-- Loading screen -->
+  <!-- Loading -->
   <div id="loading">
-    <div class="spinner"></div>
-    <div class="loading-msg">Loading brochure...</div>
+    <div id="spinner"></div>
+    <div>Loading…</div>
   </div>
 
-  <div class="flipbook" id="flipbook"></div>
-
-  <div class="controls" id="controls">
-    <button class="nav-btn" id="prevBtn">← Previous</button>
-    <button class="nav-btn" id="nextBtn">Next →</button>
+  <!-- Book -->
+  <div class="book-container">
+    <div class="book" id="book">
+      <div style="background:#fff url('page1.jpg') center/cover no-repeat;"></div>
+      <div style="background:#fff url('page2.jpg') center/cover no-repeat;"></div>
+      <div style="background:#fff url('page3.jpg') center/cover no-repeat;"></div>
+      <div style="background:#fff url('page4.jpg') center/cover no-repeat;"></div>
+    </div>
+    <div class="controls">
+      <button id="prev">◀ Prev</button>
+      <button id="next">Next ▶</button>
+    </div>
   </div>
 
   <script>
-    const PREFIX = "pg";  // change if images are in folder: "images/pg"
-    const EXTENSIONS = ["jpg","jpeg","png","webp"];
-    const MAX_PAGES = 200;
-
-    async function detectPages(){
-      const found = [];
-      for(let i=1;i<=MAX_PAGES;i++){
-        let ok=false, path="";
-        for(const ext of EXTENSIONS){
-          const src = `${PREFIX}${i}.${ext}`;
-          const exists = await checkImage(src);
-          if(exists){ ok=true; path=src; break; }
-        }
-        if(ok) found.push(path);
-        else if(found.length>0) break; // stop when gap found
-      }
-      return found;
-    }
-
-    function checkImage(src){
-      return new Promise(resolve=>{
-        const img = new Image();
-        img.onload = ()=>resolve(true);
-        img.onerror = ()=>resolve(false);
-        img.src = src + "?v=" + Date.now(); // cache busting
-      });
-    }
-
-    async function init(){
-      const pages = await detectPages();
-      document.getElementById("loading").style.display="none";
-
-      if(pages.length===0){
-        const fb = document.querySelector("#flipbook");
-        fb.style.display="flex";
-        fb.innerHTML = "<div style='padding:40px;text-align:center;width:100%;color:#000'>No pages found</div>";
-        return;
-      }
-
-      const flipbook = document.querySelector("#flipbook");
-      pages.forEach(src=>{
-        const div = document.createElement("div");
-        div.className = "page";
-        div.style.backgroundImage = `url(${src})`;
-        flipbook.appendChild(div);
-      });
-
-      flipbook.style.display="block";
-      document.getElementById("controls").style.display="flex";
-
-      // init turn.js
-      $('#flipbook').turn({
+    $(function () {
+      $("#book").turn({
+        width: $(".book").width(),
+        height: $(".book").height(),
         autoCenter: true,
-        gradients: true,
-        elevation: 50,
-        display: window.innerWidth < 768 ? "single" : "double"
       });
 
-      // navigation
-      $('#prevBtn').on("click", ()=> $('#flipbook').turn("previous"));
-      $('#nextBtn').on("click", ()=> $('#flipbook').turn("next"));
+      $("#prev").click(() => $("#book").turn("previous"));
+      $("#next").click(() => $("#book").turn("next"));
 
-      // responsive sizing
-      function resizeFlipbook(){
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        const aspect = 1.414; // A4 ratio
-      
-        let targetW, targetH;
-      
-        if(vw > vh){ 
-          // LANDSCAPE → fit width first
-          targetW = vw * 0.95; 
-          targetH = targetW * aspect;
-      
-          // but don’t exceed viewport height
-          if(targetH > vh * 0.9){
-            targetH = vh * 0.9;
-            targetW = targetH / aspect;
-          }
-        } else {
-          // PORTRAIT → fit height first
-          targetH = vh * 0.85;
-          targetW = targetH / aspect;
-      
-          // don’t exceed viewport width
-          if(targetW > vw * 0.95){
-            targetW = vw * 0.95;
-            targetH = targetW * aspect;
-          }
-        }
-      
-        $('#flipbook').turn('size', targetW, targetH);
-        const fb = document.querySelector("#flipbook");
-        fb.style.width = targetW + "px";
-        fb.style.height = targetH + "px";
-      }
+      // Hide loading when ready
+      $("#book").on("turned", () => {
+        $("#loading").fadeOut();
+      });
 
-      resizeFlipbook();
-      window.addEventListener("resize", resizeFlipbook);
-    }
-
-    init();
+      // Fallback hide after short delay
+      setTimeout(() => $("#loading").fadeOut(), 1500);
+    });
   </script>
 </body>
 </html>
