@@ -135,20 +135,36 @@
       function resizeFlipbook(){
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-
-        // maintain A4 ratio ~ 1:1.414
-        let targetW = Math.min(vw * 0.9, 1200); // keep 10% padding
-        let targetH = targetW * 1.414;
-
-        // If too tall, shrink by height instead
-        if(targetH > vh * 0.85){
+        const aspect = 1.414; // A4 ratio
+      
+        let targetW, targetH;
+      
+        if(vw > vh){ 
+          // LANDSCAPE → fit width first
+          targetW = vw * 0.95; 
+          targetH = targetW * aspect;
+      
+          // but don’t exceed viewport height
+          if(targetH > vh * 0.9){
+            targetH = vh * 0.9;
+            targetW = targetH / aspect;
+          }
+        } else {
+          // PORTRAIT → fit height first
           targetH = vh * 0.85;
-          targetW = targetH / 1.414;
+          targetW = targetH / aspect;
+      
+          // don’t exceed viewport width
+          if(targetW > vw * 0.95){
+            targetW = vw * 0.95;
+            targetH = targetW * aspect;
+          }
         }
-
+      
         $('#flipbook').turn('size', targetW, targetH);
-        flipbook.style.width = targetW + "px";
-        flipbook.style.height = targetH + "px";
+        const fb = document.querySelector("#flipbook");
+        fb.style.width = targetW + "px";
+        fb.style.height = targetH + "px";
       }
 
       resizeFlipbook();
